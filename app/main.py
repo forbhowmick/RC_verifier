@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from app.api.routes import router
 
-app = FastAPI(
+app  = FastAPI(
     title="RC Fraud Detection API",
     version="1.0.0"
 )

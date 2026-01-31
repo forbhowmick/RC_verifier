@@ -10,3 +10,6 @@ __pycache__/
 
 # Environment variables
 .env
+
+# data
+app\data\api_verifies.xlsx

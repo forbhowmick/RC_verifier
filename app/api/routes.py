@@ -1,47 +1,48 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException
-import tempfile
+from fastapi import APIRouter, UploadFile, File
+import shutil
 import os
 
 from app.services.ocr_service import extract_rc_details
+from app.services.db_verification_service import verify_vrn_in_database
 
 router = APIRouter()
 
-
-@router.get("/")
-def health():
-    return {"status": "RC Fraud Detection API is running"}
+UPLOAD_DIR = "uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
 @router.post("/verify-rc")
 async def verify_rc(file: UploadFile = File(...)):
-    """
-    Upload RC image and extract VRN + Engine details
-    """
+    image_path = os.path.join(UPLOAD_DIR, file.filename)
 
-    # 1. Validate file type
-    if not file.content_type.startswith("image/"):
-        raise HTTPException(
-            status_code=400,
-            detail="Only image files are allowed"
-        )
+    with open(image_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
 
-    # 2. Save image temporarily
-    try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
-            tmp.write(await file.read())
-            temp_path = tmp.name
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to save uploaded image"
-        )
+    ocr_result = extract_rc_details(image_path)
 
-    # 3. Run OCR
-    try:
-        result = extract_rc_details(temp_path)
-    finally:
-        # 4. Cleanup temp file
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+    # SAFELY read vrn
+    vrn = ocr_result.get("vrn")
 
-    return result
+    if ocr_result["status"] != "SUCCESS":
+        return {
+            "status": "FAIL",
+            "stage": "OCR",
+            "details": ocr_result
+        }
+
+    if not vrn:
+        return {
+            "status": "FAIL",
+            "stage": "VRN_EXTRACTION",
+            "reason": "VRN_NOT_FOUND",
+            "ocr_text": ocr_result["raw_text"]
+        }
+
+    db_result = verify_vrn_in_database(vrn)
+
+    return {
+        "status": "SUCCESS",
+        "vrn": vrn,
+        "db_verification": db_result,
+        "ocr_text": ocr_result["raw_text"]
+    }
